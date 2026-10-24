@@ -1,0 +1,58 @@
+version: "3.8"
+
+services:
+  # 1. Navidrome - Personal Music Streaming
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    restart: unless-stopped
+    ports:
+      - "4533:4533"
+    environment:
+      ND_SCANSCHEDULE: 1h
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: 24h
+    volumes:
+      - /DATA/AppData/navidrome:/data
+      - /DATA/Media/Music:/music:ro
+
+  # 2. Vaultwarden - Bitwarden Password Manager
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+    ports:
+      - "10380:80"
+    volumes:
+      - /DATA/AppData/vaultwarden/data:/data
+    environment:
+      - WEBSOCKET_ENABLED=true
+
+  # 3. slskd - Soulseek Music Downloader
+  slskd:
+    image: slskd/slskd:latest
+    container_name: slskd
+    restart: unless-stopped
+    ports:
+      - "5030:5030"
+      - "50300:50300"
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=true
+    volumes:
+      - /DATA/AppData/slskd:/app
+      - /DATA/Media/Music:/app/downloads
+
+  # 4. AdGuard Home - DNS Ad Blocker
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: adguard-home
+    restart: unless-stopped
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3001:3000/tcp"
+      - "853:853/tcp"
+      - "784:784/udp"
+    volumes:
+      - /DATA/AppData/adguardhome/work:/opt/adguardhome/work
+      - /DATA/AppData/adguardhome/conf:/opt/adguardhome/conf

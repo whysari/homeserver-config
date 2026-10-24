@@ -1,0 +1,43 @@
+#!/bin/bash
+# System Status Script for Lenovo G50-30 Home Server
+# Location: /usr/local/bin/stats
+
+echo -e "\n================ 💻 SYSTEM OVERVIEW ================"
+
+# CPU Temperature
+if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+    temp=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+    deg=$((temp / 1000))
+    echo "🌡️  CPU Temp:   ${deg}°C"
+fi
+
+# Battery Status
+cap=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -n 1)
+stat=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -n 1)
+if [ -n "$cap" ]; then
+    echo "🔋 Battery:    ${cap}% (${stat})"
+fi
+
+# Power Draw
+pwr=$(cat /sys/class/power_supply/BAT*/power_now 2>/dev/null | head -n 1)
+if [ -n "$pwr" ] && [ "$pwr" -gt 0 ] 2>/dev/null; then
+    w=$(awk "BEGIN {printf \"%.2f Watts\n\", $pwr/1000000}")
+    echo "⚡ Power:      $w"
+else
+    echo "⚡ Power:      Plugged In (AC)"
+fi
+
+# Disk Space
+disk=$(df -h / | awk 'NR==2 {print $3 " used / " $2 " total (" $5 " full)"}')
+echo "💾 Storage:    $disk"
+
+echo -e "\n================ 🧠 RAM UTILIZATION ================"
+free -h | awk 'NR==1 {print "             " $0} NR==2 {print "RAM:         " $0}'
+
+echo -e "\n================ 📦 RUNNING APPS ==================="
+if docker stats --no-stream &>/dev/null; then
+    docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+else
+    sudo docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+fi
+echo ""
