@@ -27,6 +27,10 @@ key_constraints:
   - "Do NOT suggest video transcoding or heavy VMs (Weak 7.5W CPU)"
   - "Vaultwarden strictly requires HTTPS (Served via Tailscale Serve proxy)"
   - "Storage directory: /DATA/Media (Music, Movies) and /DATA/AppData (Container data)"
+  - "AdGuard Home rate limit MUST be 0 (disabled) to avoid whole-subnet DNS blackouts"
+  - "AdGuard Home upstream mode MUST be parallel with IPv4 upstreams (1.1.1.1, 8.8.8.8); avoid DoH/IPv6 timeouts on Univision ISP"
+  - "Tailscale client devices MUST keep Exit Node set to None for split-tunnel operation"
+  - "Windows SMB requires connecting as 192.168.1.11\\user when AllowInsecureGuestAuth=0"
 ---
 
 # 🛸 Lenovo G50-30 Home Server (`homeserver`)
@@ -49,9 +53,19 @@ When assisting with this server in future sessions, follow these operational dir
    * Local access is pinned to static IP `192.168.1.11` via NetworkManager (`wlp2s0`).
 3. **Critical Driver Blacklist:**
    * **`ideapad_laptop` MUST remain blacklisted.** Loading this module on the Lenovo G50 triggers an ACPI bug that hard-blocks the Wi-Fi card.
-4. **Data Paths:**
+4. **Data Paths & Media Architecture:**
    * Persistent container data: `/DATA/AppData/<app_name>`
-   * User media: `/DATA/Media/Music` (shared between `slskd` downloads and `navidrome` streaming).
+   * User media: `/DATA/Media/Music` (Casual streaming library for Navidrome).
+   * **DJ Techno Library:** Must remain on a dedicated external/local DJ drive (not on the server's 291GB HDD) to eliminate Wi-Fi latency and save server capacity.
+5. **AdGuard Home Operational Directives:**
+   * **Rate limiting MUST remain disabled (`ratelimit: 0`).** Setting a default limit (e.g. 20) chokes the entire `/24` subnet when a single device loads heavy web pages.
+   * **Upstream Mode:** Must be set to `parallel` using reliable IPv4 resolvers (`1.1.1.1`, `8.8.8.8`). Avoid DNS-over-HTTPS (DoH) and IPv6 bootstrap servers that fail or time out on Univision ISP.
+6. **Samba & Windows SMB Directives:**
+   * In `/etc/samba/smb.conf`, always maintain a trailing newline before share headers (especially following `include = /etc/samba/smb.casa.conf`) to prevent syntax corruptions.
+   * Windows 10/11 clients with `AllowInsecureGuestAuth = 0` must authenticate with `192.168.1.11\user` rather than attempting anonymous/guest connections.
+7. **Tailscale Client Split-Tunnel Directives:**
+   * The homeserver advertises an exit node (`--advertise-exit-node`).
+   * Client devices (iPhones, Macs, Windows PCs) should keep **Exit Node set to "None"** unless intentionally routing full web traffic through the laptop. This prevents cellular internet drops and relay timeouts.
 
 ---
 
@@ -97,10 +111,26 @@ When assisting with this server in future sessions, follow these operational dir
 │   ├── vaultwarden/data/    # Encrypted password vault database
 │   └── slskd/               # Soulseek config & transfer cache
 └── Media/
-    ├── Music/               # Shared music folder (Fed by slskd, streamed by Navidrome)
-    ├── Movies/              # Reserved for Jellyfin / video media
+    ├── Music/               # Shared casual music (Fed by slskd, streamed by Navidrome)
+    ├── Movies/              # Reserved for video media
     └── Documents/           # General network drive storage
 ```
+
+---
+
+## 🎵 Music Architecture & Format Guide
+
+| Collection Tier | Recommended Format | Location | Primary Client |
+| :--- | :--- | :--- | :--- |
+| **Casual Listening** | **AAC 256kbps (`.m4a`)** or **MP3 320kbps** | Server: `/DATA/Media/Music` | iPhone (Amperfy), Web Player |
+| **DJ Techno Tracks** | **16-bit / 44.1kHz FLAC** or **AIFF** | Dedicated External / Local DJ Drive | Rekordbox, Traktor, Serato |
+
+### Client Streaming Best Practices:
+* **iPhone & Bluetooth:** iOS transmits AAC natively over Bluetooth to AirPods and car systems. Using **AAC 256kbps (`.m4a`)** eliminates transcoding generation loss.
+* **Amperfy App (iOS):**
+  * **Wi-Fi:** Set Streaming Quality to **Original / Direct Play** (0% server CPU).
+  * **Cellular Data:** Transcodes to AAC 256kbps on the fly to save data (~6MB per track).
+  * **Offline Cache:** Set storage cache to 5GB–10GB to ensure repeat plays use 0 bytes of mobile data.
 
 ---
 
@@ -119,8 +149,17 @@ When assisting with this server in future sessions, follow these operational dir
 * *(Note: Requires Tailscale active on the client device for trusted HTTPS certificates).*
 
 ### 📁 Network Storage (Mac Finder & Windows Explorer)
-* **macOS:** Finder ➡️ `Cmd + K` ➡️ `smb://192.168.1.11` (or `smb://100.124.195.110`)
-* **Windows:** File Explorer ➡️ `Win + R` ➡️ `\\192.168.1.11`
+* **macOS:** Finder ➡️ `Cmd + K` ➡️ `smb://192.168.1.11` *(Connect as Guest or `user`)*.
+* **Windows Explorer (Map Network Drive):**
+  1. Open File Explorer ➡️ **This PC** ➡️ **Map network drive**.
+  2. Folder: `\\192.168.1.11\DATA` (or `\\192.168.1.11\Media`).
+  3. Check **"Connect using different credentials"**.
+  4. Username: `192.168.1.11\user` (or click *More choices ➡️ Use a different account*).
+  5. Password: *(Samba password configured on host)*.
+  * *Quick CLI Mount:*
+    ```cmd
+    net use Z: \\192.168.1.11\DATA /user:192.168.1.11\user
+    ```
 
 ---
 
@@ -144,7 +183,7 @@ Outputs temperature, battery level, AC status, storage, available RAM, and live 
 
 ### Docker App Management
 ```bash
-# Soulseek P2P uses ~20% CPU for network queries; keep stopped when not downloading
+# Manage Soulseek on demand
 docker stop slskd
 docker start slskd
 
@@ -168,3 +207,8 @@ docker logs --tail 30 adguard-home
    * Wi-Fi interface (`wlp2s0`) locked to `192.168.1.11/24` with Gateway `192.168.1.1` and DNS `1.1.1.1 8.8.8.8` via NetworkManager.
 5. **Tailscale HTTPS Reverse Proxy:**
    * Built-in Tailscale Serve proxies `https://homeserver.tail274b3b.ts.net` to local port `10380` with automatic Let's Encrypt certificates.
+6. **Samba File Sharing Configuration:**
+   * Installed natively via `apt install samba` and exposed on port 445. Reference configuration stored at `samba/smb.conf`. Includes CasaOS shares and dedicated `[Media]` share.
+7. **AdGuard Home Tuning:**
+   * Rate limiting set to `0` to prevent whole-network throttling.
+   * Upstreams configured to parallel IPv4 queries (`1.1.1.1`, `8.8.8.8`) to avoid ISP DoH timeouts.
