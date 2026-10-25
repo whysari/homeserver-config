@@ -212,3 +212,6 @@ docker logs --tail 30 adguard-home
 7. **AdGuard Home Tuning:**
    * Rate limiting set to `0` to prevent whole-network throttling.
    * Upstreams configured to parallel IPv4 queries (`1.1.1.1`, `8.8.8.8`) to avoid ISP DoH timeouts.
+8. **Wi-Fi Power Management & Sleep Disabled:**
+   * `/etc/NetworkManager/conf.d/disable-wifi-powersave.conf` sets `wifi.powersave = 2` (disabled) and `iw dev wlp2s0 set power_save off`.
+   * `/etc/modprobe.d/rtl8723be.conf` configures `ips=0 fwlps=0 swlps=0 msi=1` to prevent Realtek Wi-Fi radio from entering periodic DTIM sleep states that cause 5,000+ ms latency spikes.
