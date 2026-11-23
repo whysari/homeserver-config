@@ -1,7 +1,7 @@
 ---
 machine_name: homeserver
 hardware: Lenovo G50-30 Laptop
-os: Debian 12 (Bookworm) minimal headless # Verify with: cat /etc/os-release
+os: Debian 12 (Bookworm) minimal headless
 cpu: Intel Bay Trail Celeron/Pentium SoC (x86_64, 7.5W TDP)
 ram: 4GB DDR3L (Non-upgradable)
 storage: 291GB SATA HDD
@@ -17,17 +17,20 @@ network:
   isp: Univision (Router admin locked; no port forwarding)
 active_services:
   recasaos: { port: 80, role: "Web OS Dashboard" }
-  navidrome: { port: 4533, role: "Subsonic Music Streaming Server" }
-  adguard_home: { port_web: 3001, port_dns: 53, role: "DNS Sinkhole & Ad Blocker" }
-  vaultwarden: { port: 10380, url_https: "https://homeserver.tail274b3b.ts.net", role: "Bitwarden Password Vault" }
-  opengym: { port_local: "127.0.0.1:3840", url_https: "https://homeserver.tail274b3b.ts.net:8443", role: "Self-Hosted Gym & Workout Tracker (Passkey/PWA)" }
-  upsnap: { port: 8090, network: "host", role: "Wake-on-LAN & Device Status Dashboard" }
+  navidrome: { port: 4533, image: "deluan/navidrome:latest", role: "Subsonic Music Streaming Server" }
+  adguard_home: { port_web: 3001, port_dns: 53, image: "adguard/adguardhome:v0.107.80", role: "DNS Sinkhole & Ad Blocker" }
+  vaultwarden: { port: 10380, image: "vaultwarden/server:1.37.5", url_https: "https://homeserver.tail274b3b.ts.net", role: "Bitwarden Password Vault" }
+  opengym: { port_local: "127.0.0.1:3840", image: "ghcr.io/duartesantos8/opengym-{api,web}:latest", url_https: "https://homeserver.tail274b3b.ts.net:8443", role: "Self-Hosted Gym & Workout Tracker (Passkey/PWA)" }
+  upsnap: { port: 8090, image: "ghcr.io/seriousm4x/upsnap:5", network: "host", role: "Wake-on-LAN & Device Status Dashboard" }
+  watchtower: { image: "nickfedor/watchtower:latest", schedule: "weekly (604800s)", role: "Automated Docker Image Updater (with cleanup)" }
   slskd: { port: 5030, status: "on-demand", role: "Soulseek P2P Downloader (Stopped when idle)" }
   samba: { port: 445, role: "Native SMB Network Drive" }
 key_constraints:
   - "Do NOT suggest ideapad_laptop kernel module (Causes ACPI rfkill bug that hard-blocks Wi-Fi)"
   - "Do NOT suggest video transcoding or heavy VMs (Weak 7.5W CPU)"
-  - "Do NOT run containrrr/watchtower (Archived; crash-loops on Docker 29+ due to API v1.25)"
+  - "Do NOT run containrrr/watchtower (Archived; crash-loops on Docker 29+ due to API v1.25). Use nickfedor/watchtower instead"
+  - "CasaOS compose files in /var/lib/casaos/apps/<app>/ use $AppID; ALWAYS pass AppID=<app> (and TZ if required) when running docker compose manually via CLI, or mounts resolve to /DATA/AppData//..."
+  - "Tailscale DNS routes through AdGuard Home on homeserver; if adguard-home stops or resets, Tailscale clients lose DNS resolution"
   - "Vaultwarden strictly requires HTTPS (Tailscale Serve port 443 -> 127.0.0.1:10380)"
   - "openGym strictly requires HTTPS + matching RP_ID/ORIGIN for WebAuthn passkeys (Tailscale Serve port 8443 -> 127.0.0.1:3840; never change RP_ID after creating profiles)"
   - "Storage directories: /DATA/Media (Music, Movies), /DATA/AppData (Container data), and ~/openGym (Git + Compose stack)"
@@ -54,6 +57,7 @@ When assisting with this server in future sessions, follow these operational dir
 2. **Networking & Router Constraints:**
    * ISP router (Univision) is completely locked down. No port-forwarding or router DHCP changes are possible.
    * Remote access and secure HTTPS are handled entirely through **Tailscale** (`100.124.195.110` / `homeserver.tail274b3b.ts.net`).
+   * **Tailscale DNS Dependency:** Tailscale DNS routes through **AdGuard Home** on `homeserver`. If `adguard-home` stops or mounts an empty config, all Tailscale-connected devices lose DNS resolution.
    * **Tailscale Serve Port Allocation:** Port `443` is reserved for **Vaultwarden** (`127.0.0.1:10380`). Additional HTTPS services use custom Tailscale Serve ports (e.g., `:8443` for **openGym** -> `127.0.0.1:3840`) so existing services are not overwritten.
    * Local access is pinned to static IP `192.168.1.11` via NetworkManager (`wlp2s0`).
 3. **Critical Driver Blacklist:**
@@ -63,20 +67,25 @@ When assisting with this server in future sessions, follow these operational dir
    * Git-managed Compose stacks: `~/openGym` (stores DB/VAPID/audit data in `~/openGym/data`)
    * User media: `/DATA/Media/Music` (Casual streaming library for Navidrome).
    * **DJ Techno Library:** Must remain on a dedicated external/local DJ drive (not on the server's 291GB HDD) to eliminate Wi-Fi latency and save server capacity.
-5. **openGym WebAuthn / Passkey Rules:**
+5. **CasaOS Compose `$AppID` Rule:**
+   * CasaOS-managed Compose files in `/var/lib/casaos/apps/<app>/docker-compose.yml` use `$AppID` (and sometimes `$TZ`) in volume/env definitions.
+   * When managing them from SSH instead of the ReCasaOS UI, **always** pass `AppID=<app>` (e.g., `sudo AppID=adguard-home docker compose ...`), otherwise `$AppID` expands to blank and mounts an empty directory.
+6. **openGym WebAuthn / Passkey Rules:**
    * `RP_ID` (`homeserver.tail274b3b.ts.net`) and `ORIGIN` (`https://homeserver.tail274b3b.ts.net:8443`) MUST match the exact Tailscale Serve URL. Changing `RP_ID` later invalidates existing passkeys.
    * Bound locally to `127.0.0.1:3840` (`WEB_PORT`) so it is reachable only via Tailscale Serve, avoiding LAN/dev port `8080` conflicts.
-6. **AdGuard Home Operational Directives:**
+7. **AdGuard Home Operational Directives:**
    * **Rate limiting MUST remain disabled (`ratelimit: 0`).** Setting a default limit (e.g. 20) chokes the entire `/24` subnet when a single device loads heavy web pages.
    * **Upstream Mode:** Must be set to `parallel` using reliable IPv4 resolvers (`1.1.1.1`, `8.8.8.8`). Avoid DNS-over-HTTPS (DoH) and IPv6 bootstrap servers that fail or time out on Univision ISP.
-7. **Samba & Windows SMB Directives:**
+8. **Samba & Windows SMB Directives:**
    * In `/etc/samba/smb.conf`, always maintain a trailing newline before share headers (especially following `include = /etc/samba/smb.casa.conf`) to prevent syntax corruptions.
    * Windows 10/11 clients with `AllowInsecureGuestAuth = 0` must authenticate with `192.168.1.11\user` rather than attempting anonymous/guest connections.
-8. **Tailscale Client Split-Tunnel Directives:**
+9. **Tailscale Client Split-Tunnel Directives:**
    * The homeserver advertises an exit node (`--advertise-exit-node`).
    * Client devices (iPhones, Macs, Windows PCs) should keep **Exit Node set to "None"** unless intentionally routing full web traffic through the laptop. This prevents cellular internet drops and relay timeouts.
-9. **Container Updates:**
-   * Do **not** use `containrrr/watchtower` (archived and incompatible with Docker 29+). Prefer controlled `docker compose pull && docker compose up -d` updates or modern alternatives (`getwud/wud` / `nickfedor/watchtower`).
+10. **Container Updates:**
+    * Do **not** use `containrrr/watchtower` (archived; fails on Docker 29+ with `client version 1.25 is too old`).
+    * Automated weekly updates (`WATCHTOWER_POLL_INTERVAL=604800`, `WATCHTOWER_CLEANUP=true`) are handled by **`nickfedor/watchtower:latest`**.
+    * Floating tags (`navidrome:latest`, `upsnap:5`, `opengym:latest`) auto-update when running; critical infra (`vaultwarden:1.37.5`, `adguardhome:v0.107.80`) is intentionally version-pinned for controlled manual updates.
 
 ---
 
@@ -104,11 +113,12 @@ When assisting with this server in future sessions, follow these operational dir
 | Service | Purpose | Local Access URL | Tailscale (Remote) URL | Host Port | Container Port | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **ReCasaOS** | Web OS / Dashboard | `http://192.168.1.11` | `http://100.124.195.110` | `80` | Native | Always-on |
-| **Navidrome** | Music Streamer | `http://192.168.1.11:4533` | `http://100.124.195.110:4533` | `4533` | `4533` | Always-on |
-| **AdGuard Home** | DNS & Ad Blocker | `http://192.168.1.11:3001` | `http://100.124.195.110:3001` | `3001` (Web) / `53` (DNS) | `3000` / `53` | Always-on |
-| **Vaultwarden** | Bitwarden Password Vault | `http://192.168.1.11:10380` | `https://homeserver.tail274b3b.ts.net` *(HTTPS)* | `10380` | `80` | Always-on (Tailscale Serve `:443`) |
-| **openGym** | Gym & Workout Tracker | `—` *(localhost only)* | `https://homeserver.tail274b3b.ts.net:8443` *(HTTPS)* | `127.0.0.1:3840` | `80` | Pause/resume via Compose (Tailscale Serve `:8443`) |
-| **UpSnap** | Wake-on-LAN Dashboard | `http://192.168.1.11:8090` | `http://100.124.195.110:8090` | `8090` | `host` | Always-on |
+| **Navidrome** | Music Streamer | `http://192.168.1.11:4533` | `http://100.124.195.110:4533` | `4533` | `4533` | Always-on (`:latest`) |
+| **AdGuard Home** | DNS & Ad Blocker | `http://192.168.1.11:3001` | `http://100.124.195.110:3001` | `3001` (Web) / `53` (DNS) | `3000` / `53` | Always-on (`v0.107.80`) |
+| **Vaultwarden** | Bitwarden Password Vault | `http://192.168.1.11:10380` | `https://homeserver.tail274b3b.ts.net` *(HTTPS)* | `10380` | `80` | Always-on (`1.37.5`, Serve `:443`) |
+| **openGym** | Gym & Workout Tracker | `—` *(localhost only)* | `https://homeserver.tail274b3b.ts.net:8443` *(HTTPS)* | `127.0.0.1:3840` | `80` | Pause/resume via Compose (Serve `:8443`) |
+| **UpSnap** | Wake-on-LAN Dashboard | `http://192.168.1.11:8090` | `http://100.124.195.110:8090` | `8090` | `host` | Always-on (`:5`) |
+| **Watchtower** | Auto Container Updater | `—` | `—` | `—` | `—` | `nickfedor/watchtower:latest` (weekly) |
 | **slskd** | Soulseek P2P Downloader | `http://192.168.1.11:5030` | `http://100.124.195.110:5030` | `5030` | `5030` | On-demand (stopped when idle) |
 | **Samba (SMB)** | Native Network Drive | `smb://192.168.1.11` | `smb://100.124.195.110` | `445` | Native | Always-on |
 
@@ -120,7 +130,7 @@ When assisting with this server in future sessions, follow these operational dir
 /DATA/
 ├── AppData/
 │   ├── navidrome/           # Navidrome database & cache
-│   ├── adguardhome/         # AdGuard filter lists & query logs
+│   ├── adguard-home/        # AdGuard filter lists & query logs
 │   ├── vaultwarden/data/    # Encrypted password vault database
 │   ├── upsnap/              # UpSnap PocketBase data
 │   └── slskd/               # Soulseek config & transfer cache
@@ -209,6 +219,10 @@ Outputs temperature, battery level, AC status, storage, available RAM, and live 
 docker stop slskd
 docker start slskd
 
+# Safe CLI update for CasaOS-managed apps (always pass AppID!)
+sudo AppID=vaultwarden docker compose -f /var/lib/casaos/apps/vaultwarden/docker-compose.yml pull
+sudo AppID=vaultwarden docker compose -f /var/lib/casaos/apps/vaultwarden/docker-compose.yml up -d
+
 # Pause / Resume / Update openGym (keeps ~/openGym/data intact)
 cd ~/openGym
 docker compose stop          # Pause (stays off across reboots)
@@ -223,6 +237,7 @@ docker logs --tail 30 navidrome
 docker logs --tail 30 vaultwarden
 docker logs --tail 30 adguard-home
 docker logs --tail 30 upsnap
+docker logs --tail 30 watchtower
 ```
 
 ---
